@@ -1,11 +1,11 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
+import os
+
+TASK_DIR = os.path.dirname(__file__)
 
 import gymnasium as gym
 
 from . import agents
+from . import tasks
 
 ##
 # Register Gym environments.
@@ -13,11 +13,21 @@ from . import agents
 
 
 gym.register(
-    id="Isaac-So101-Isaac-v0",
+    id="reach-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.so101_isaac_env_cfg:So101IsaacEnvCfg",
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
+        "env_cfg_entry_point": f"{tasks.__name__}.reach_env_cfg:ReachTaskCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:ReachPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="lift-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{tasks.__name__}.lift_env_cfg:LiftTaskCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftPPORunnerCfg",
     },
 )
