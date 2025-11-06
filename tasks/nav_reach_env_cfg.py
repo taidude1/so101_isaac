@@ -19,7 +19,8 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
 
-from ..assets import SO101_CFG
+from isaaclab_tasks.manager_based.so101_isaac.assets import SO101_CFG
+import isaaclab_tasks.manager_based.so101_isaac.mdp as so101_mdp
 
 ##
 # Scene definition
@@ -67,10 +68,10 @@ class CommandsCfg:
     ee_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="gripper_link",
-        resampling_time_range=(4.0, 4.0),
+        resampling_time_range=(4.02, 4.02),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.2, 0.34),
+            pos_x=(0.2, 0.4),
             pos_y=(-0.1, 0.1),
             pos_z=(0.05, 0.25),
             roll=(0.0, 0.0),
@@ -84,12 +85,9 @@ class CommandsCfg:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    # arm_action: ActionTerm = mdp.EMAJointPositionToLimitsActionCfg(
-    #     asset_name="robot", joint_names=["(wrist.*|elbow.*|shoulder.*|gripper)"],
-    #     scale=0.5, alpha=0.5
-    # )
-    arm_action: ActionTerm = mdp.RelativeJointPositionActionCfg(
-        asset_name="robot", joint_names=[".*"], scale=0.02, clip={".*": (-0.2, 0.2)}
+    arm_action: ActionTerm = mdp.JointPositionToLimitsActionCfg(
+        asset_name="robot", joint_names=["(wrist.*|elbow.*|shoulder.*|gripper)"],
+        scale=0.2,
     )
     gripper_action: ActionTerm | None = None
 
@@ -120,14 +118,15 @@ class ObservationsCfg:
 class EventCfg:
     """Configuration for events."""
 
-    reset_robot_joints = EventTerm(
-        func=mdp.reset_joints_by_scale,
-        mode="reset",
-        params={
-            "position_range": (0.5, 1.5),
-            "velocity_range": (0.0, 0.0),
-        },
-    )
+    # reset_robot_joints = EventTerm(
+    #     func=mdp.reset_joints_by_scale,
+    #     mode="reset",
+    #     params={
+    #         "position_range": (0.5, 1.5),
+    #         "velocity_range": (0.0, 0.0),
+    #     },
+    # )
+    pass
 
 
 @configclass
@@ -135,29 +134,29 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # task terms
-    end_effector_position_tracking = RewTerm(
-        func=mdp.position_command_error,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"), "command_name": "ee_pose"},
+
+    end_effector_pose = RewTerm(
+        func=so101_mdp.pose_time_based,
+        weight=1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
+            "std": 1.0
+        },
     )
-    end_effector_position_tracking_fine_grained = RewTerm(
-        func=mdp.position_command_error_tanh,
-        weight=0.1,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"), "std": 0.1, "command_name": "ee_pose"},
-    )
-    end_effector_orientation_tracking = RewTerm(
-        func=mdp.orientation_command_error,
-        weight=-0.1,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"), "command_name": "ee_pose"},
+    end_effector_pose_fine_grained = RewTerm(
+        func=so101_mdp.pose_time_based,
+        weight=1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
+            "std": 0.1
+        },
     )
 
     # action penalty
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-0.0001,
-        params={"asset_cfg": SceneEntityCfg("robot")},
-    )
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.0001)
+    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-0.000001)
+    joint_torque = RewTerm(func=mdp.joint_torques_l2, weight=-0.0001)
 
 
 @configclass
@@ -171,13 +170,7 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    action_rate = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.005, "num_steps": 24 * 600}
-    )
-
-    joint_vel = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.001, "num_steps": 24 * 600}
-    )
+    pass
 
 
 ##
@@ -186,7 +179,7 @@ class CurriculumCfg:
 
 
 @configclass
-class ReachTaskCfg(ManagerBasedRLEnvCfg):
+class NavReachTaskCfg(ManagerBasedRLEnvCfg):
     """Configuration for the reach end-effector pose tracking environment."""
 
     # Scene settings
@@ -207,6 +200,6 @@ class ReachTaskCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 2
         self.sim.render_interval = 2
-        self.episode_length_s = 12.0
+        self.episode_length_s = 4
         # simulation settings
         self.sim.dt = 0.01
