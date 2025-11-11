@@ -1,0 +1,28 @@
+# File containing environment variables (e.g. W&B credentials)
+# e.g. /path/to/so101_isaac/scripts/local_ray/.env.ray
+env_file: ...
+# UT EID (for tracking ownership of Ray jobs)
+user_id: ...
+# Working directory during job, should contain your scripts
+# e.g. /path/to/so101_isaac/scripts
+ext_dir: ...
+# Train script to execute on cluster
+python_script: "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/manager_based/so101_isaac/scripts/train.py"
+# Additional dependencies to mount at runtime (will also auto-install module dependencies if setup.py is present at root level)
+# Base environment on cluster only has the barebones Isaac Lab installation, so you will need to add custom extensions,
+#   like so101_isaac, robot_rl, etc.
+file_mounts: {
+  # e.g. "/path/to/so101_isaac": "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/manager_based/so101_isaac"
+  #      "/path/to/robot_rl": "/workspace/isaaclab/source/robot_rl"
+  ...
+}
+# Commands to execute after mounting runtime dependencies but before installation
+run_start_commands: []
+# python executable on the cluster
+"py_executable": "/workspace/isaaclab/isaaclab.sh -p"
+# patterns to exclude when copying dependencies (file_mounts) and working directory (ext_dir)
+"excludes":
+  - "**/wandb/**"
+  - "**/logs/**"
+  - "**/.git/objects/**"
+  - "**/.venv/**"

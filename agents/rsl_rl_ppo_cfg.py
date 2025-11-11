@@ -47,9 +47,3 @@ class VanillaPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 class ReachPPORunnerCfg(VanillaPPORunnerCfg):
     experiment_name = "so101_reach"
     wandb_project = "SO101_Reach"
-
-
-@configclass
-class LiftPPORunnerCfg(VanillaPPORunnerCfg):
-    experiment_name = "so101_lift"
-    wandb_project = "SO101_Lift"
