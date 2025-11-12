@@ -10,33 +10,65 @@ from isaaclab.utils.math import wrap_to_pi, combine_frame_transforms, quat_error
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-def pose_time_based(
+
+def position_command_error(
     env: ManagerBasedRLEnv,
+    command_name: str,
     asset_cfg: SceneEntityCfg,
-    std: float = 1.0,
-    duration: float = 1.0,
-    command_name: str = "ee_pose",
-) -> torch.Tensor:
-    # extract the used quantities (to enable type-hinting)
+    std: float,
+)-> torch.Tensor:
+    # extract the asset (to enable type hinting)
     asset: Articulation = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     # obtain the desired and current positions
     des_pos_b = command[:, :3]
     des_pos_w, _ = combine_frame_transforms(asset.data.root_pos_w, asset.data.root_quat_w, des_pos_b)
     curr_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids[0]]  # type: ignore
-    pos_error = torch.norm(curr_pos_w - des_pos_w, dim=1)
-    pos_reward = torch.exp(-pos_error / std)
-    # des_quat_b = command[:, 3:7]
-    # des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
-    # curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]  # type: ignore
-    # ori_error = quat_error_magnitude(curr_quat_w, des_quat_w)
-    # ori_reward = torch.exp(-ori_error / std)
-    # time_elapsed = env.episode_length_buf * env.step_dt
-    return pos_reward
-    # return torch.where(
-    #     env.max_episode_length_s - time_elapsed < duration,
-    #     pos_reward * (1 + ori_reward) / 2,
-    #     pos_reward,
-    #     # 0.0 
-    # )
+    error = curr_pos_w - des_pos_w
+    return torch.exp(-error.pow(2).sum(dim=1) / std**2)
 
+def orientation_command_error(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    std: float,
+) -> torch.Tensor:
+    # extract the asset (to enable type hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    # obtain the desired and current orientations
+    des_quat_b = command[:, 3:7]
+    des_quat_w = quat_mul(asset.data.root_quat_w, des_quat_b)
+    curr_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids[0]]  # type: ignore
+    error = quat_error_magnitude(curr_quat_w, des_quat_w)
+    return torch.exp(-error.pow(2) / std**2)
+
+def action_rate_l2(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    error = env.action_manager.action - env.action_manager.prev_action
+    return error.pow(2).sum(dim=1)
+
+def joint_vel_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return asset.data.joint_vel[:, asset_cfg.joint_ids].pow(2).sum(dim=1)
+
+def joint_acc_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return asset.data.joint_acc[:, asset_cfg.joint_ids].pow(2).sum(dim=1)
+
+def joint_torques_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return asset.data.applied_torque[:, asset_cfg.joint_ids].pow(2).sum(dim=1)
