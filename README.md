@@ -63,7 +63,8 @@ This should display a blank table.
 
 - Sends a job to the server.
     - You can modify the script that runs (e.g. between `train.py` and `play.py`) in the `python_script` field of `job_config.yaml`
-- Can be followed by any arguments you'd like to pass to the script (e.g. `--task reach-v0`).
+- Can be followed by any arguments you'd like to pass to the script (e.g. `--task reach-v0`)
+- Note that once you start a job, the program will output the logs from the job into your shell. You can exit this (Ctrl-C) without affecting the job
 
 ### `./ray.sh stop <job_id>`
 
@@ -76,9 +77,11 @@ This should display a blank table.
 - View all users' runs with `--all_users`
 - View the status of all runs with `--all_statuses`
 
-### `./ray.sh logs <job_id> <out_file>`
+### `./ray.sh logs <job_id>`
 
-- Download logs for a job and write them to a specified file
+- Download and print logs for a job
+- Can provide additional arguments (see [`ray job logs` docs](https://docs.ray.io/en/latest/cluster/running-applications/job-submission/cli.html#ray-job-logs))
+- You can redirect the output to a file with the `>` operator: `./ray.sh logs <job_id> > <file_path>`
 - Generally, you can use W&B to view your run logs and metrics. This function is mainly for when your job fails before it can deploy, or if you aren't using W&B
 
 ## Relevant files

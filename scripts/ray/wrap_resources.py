@@ -80,7 +80,7 @@ def wrap_resources_to_jobs(jobs: list[str], args: argparse.Namespace) -> None:
             # "py_executable": "/workspace/isaaclab/isaaclab.sh -p",
             # "py_modules": None if not args.py_modules else args.py_modules,
         },
-        log_to_driver=False,
+        log_to_driver=True,
     )
     gpu_node_resources = util.get_gpu_node_resources(include_id=True, include_gb_ram=True)
 

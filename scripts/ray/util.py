@@ -709,7 +709,8 @@ def submit_wrapped_jobs(
         while future:
             ready, not_ready = ray.wait(future, timeout=5)
             for result in ray.get(ready):
-                print(f"\n{result}\n")
+                pass
+                # print(f"\n{result}\n")
             future = not_ready
         print("[INFO] all jobs completed.")
     except KeyboardInterrupt:

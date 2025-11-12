@@ -35,10 +35,10 @@ help() {
     echo -e "\noptions:"
     echo -e "  -h              Display this help message."
     echo -e "\ncommands:"
-    echo -e "  job [<job_args>]                             Submit a job to the cluster."
-    echo -e "  stop [<run_id>] [<script_args>]              Stop a currently running job."
-    echo -e "  list [<script_args>]                         View existing jobs on the cluster."
-    echo -e "  logs [<run_id>] [<out_file>] [<script_args>] Write logs from a run to <out_file>."
+    echo -e "  job [<job_args>]                     Submit a job to the cluster."
+    echo -e "  stop [<run_id>] [<script_args>]      Stop a currently running job."
+    echo -e "  list [<script_args>]                 View existing jobs on the cluster."
+    echo -e "  logs [<run_id>] [<script_file>]      Print logs from a run."
     echo -e "\nwhere:"
     echo -e "  <job_args> are optional arguments specific to the job command."
     echo -e "  <script_args> are the per-script arguments (see Ray documentation and list_jobs.py)."
@@ -107,12 +107,11 @@ case $command in
         ;;
     logs)
         job_id=$1
-        out_file=$2
-        shift 2
+        shift 1
         logs_args="$@"
         source $SCRIPT_DIR/.env.ray
         if python $SCRIPT_DIR/list_jobs.py --user_id $UT_EID --all_statuses --check_id $job_id; then
-            ray job logs --address http://100.79.16.15:8265 $job_id $logs_args > $out_file
+            ray job logs --address http://100.79.16.15:8265 $job_id $logs_args
         else
             echo "[ERROR] The specified job $job_id cannot be stopped."
             echo "[ERROR] You may only view the logs of jobs started by you."
