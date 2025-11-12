@@ -2,7 +2,7 @@
 name = "so101_isaac_scripts"
 version = "0.1.0"
 description = "Environment for running Ray scripts"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 
 dependencies = [
     "ray[default]==2.50.1",
