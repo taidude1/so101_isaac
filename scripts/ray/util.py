@@ -90,11 +90,11 @@ def get_invocation_command_from_cfg(
                 else:
                     target_list.append(f"{key}={value}")
 
-    print(f"[INFO]: Starting workflow {workflow}")
+    print(f"[INFO] Starting workflow {workflow}")
     process_args(cfg["runner_args"], runner_args)
-    print(f"[INFO]: Retrieved workflow runner args: {runner_args}")
+    print(f"[INFO] Retrieved workflow runner args: {runner_args}")
     process_args(cfg["hydra_args"], hydra_args, is_hydra=True)
-    print(f"[INFO]: Retrieved hydra args: {hydra_args}")
+    print(f"[INFO] Retrieved hydra args: {hydra_args}")
 
     invoke_cmd = f"{python_cmd} {workflow} "
     invoke_cmd += " ".join(runner_args) + " " + " ".join(hydra_args)
@@ -115,6 +115,59 @@ class LogExtractionError(Exception):
     """Raised when we cannot extract experiment_name/logdir from the trainer output."""
 
     pass
+
+
+def run_test_job(identifier_string: str, result_details: list[str]) -> None:
+    import torch
+
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.free,serial", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        output = result.stdout.strip().split("\n")
+        for gpu_info in output:
+            name, memory_free, serial = gpu_info.split(", ")
+            result_details.append(
+                f"{identifier_string}[INFO] Name: {name}|Memory Available: {memory_free} MB|Serial Number {serial} \n"
+            )
+
+        # Get GPU count from PyTorch
+        num_gpus_detected = torch.cuda.device_count()
+        result_details.append(f"{identifier_string}[INFO] Detected GPUs from PyTorch: {num_gpus_detected} \n")
+
+        # Check CUDA_VISIBLE_DEVICES and count the number of visible GPUs
+        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if cuda_visible_devices:
+            visible_devices_count = len(cuda_visible_devices.split(","))
+            result_details.append(
+                f"{identifier_string}[INFO] GPUs visible via CUDA_VISIBLE_DEVICES: {visible_devices_count} \n"
+            )
+        else:
+            visible_devices_count = len(output)  # All GPUs visible if CUDA_VISIBLE_DEVICES is not set
+            result_details.append(
+                f"{identifier_string}[INFO] CUDA_VISIBLE_DEVICES not set; all GPUs visible ({visible_devices_count}) \n"
+            )
+
+        # If PyTorch GPU count disagrees with nvidia-smi, reset CUDA_VISIBLE_DEVICES and rerun detection
+        if num_gpus_detected != len(output):
+            result_details.append(
+                f"{identifier_string}[WARN] PyTorch and nvidia-smi disagree on GPU count! Re-running with all"
+                " GPUs visible. \n"
+            )
+            result_details.append(f"{identifier_string}[INFO] This shows that GPU resources were isolated.\n")
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(i) for i in range(len(output))])
+            num_gpus_detected_after_reset = torch.cuda.device_count()
+            result_details.append(
+                f"{identifier_string}[INFO] After setting CUDA_VISIBLE_DEVICES, PyTorch detects"
+                f" {num_gpus_detected_after_reset} GPUs \n"
+            )
+
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Error calling nvidia-smi: {e.stderr}")
+        result_details.append("[ERROR] Failed to retrieve GPU information")
 
 
 def execute_job(
@@ -143,98 +196,81 @@ def execute_job(
     Raises:
         ValueError: If the job is unable to start, or throws an error. Most likely to happen
             due to running out of memory.
+        RuntimeError: If the job is able to run, but throws an error.
 
     Returns:
         Relevant information from the job
     """
     start_time = datetime.now().strftime("%H:%M:%S.%f")
     result_details = [f"{identifier_string}: ---------------------------------\n"]
-    result_details.append(f"{identifier_string}:[INFO]: Invocation {job_cmd} \n")
+    result_details.append(f"{identifier_string}:[INFO] Invocation {job_cmd} \n")
     node_id = ray.get_runtime_context().get_node_id()
-    result_details.append(f"{identifier_string}:[INFO]: Ray Node ID: {node_id} \n")
+    result_details.append(f"{identifier_string}:[INFO] Ray Node ID: {node_id} \n")
 
+    # Run nvidia-smi on each node and exit
     if test_mode:
-        import torch
+        run_test_job(identifier_string, result_details)
+        return " ".join(result_details)
 
-        try:
-            result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name,memory.free,serial", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                check=True,
-                text=True,
-            )
-            output = result.stdout.strip().split("\n")
-            for gpu_info in output:
-                name, memory_free, serial = gpu_info.split(", ")
-                result_details.append(
-                    f"{identifier_string}[INFO]: Name: {name}|Memory Available: {memory_free} MB|Serial Number"
-                    f" {serial} \n"
-                )
+    if persistent_dir:
+        og_dir = os.getcwd()
+        os.chdir(persistent_dir)
 
-            # Get GPU count from PyTorch
-            num_gpus_detected = torch.cuda.device_count()
-            result_details.append(f"{identifier_string}[INFO]: Detected GPUs from PyTorch: {num_gpus_detected} \n")
+    process = subprocess.Popen(
+        job_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+    )
 
-            # Check CUDA_VISIBLE_DEVICES and count the number of visible GPUs
-            cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
-            if cuda_visible_devices:
-                visible_devices_count = len(cuda_visible_devices.split(","))
-                result_details.append(
-                    f"{identifier_string}[INFO]: GPUs visible via CUDA_VISIBLE_DEVICES: {visible_devices_count} \n"
-                )
-            else:
-                visible_devices_count = len(output)  # All GPUs visible if CUDA_VISIBLE_DEVICES is not set
-                result_details.append(
-                    f"{identifier_string}[INFO]: CUDA_VISIBLE_DEVICES not set; all GPUs visible"
-                    f" ({visible_devices_count}) \n"
-                )
+    if persistent_dir:
+        os.chdir(og_dir)
 
-            # If PyTorch GPU count disagrees with nvidia-smi, reset CUDA_VISIBLE_DEVICES and rerun detection
-            if num_gpus_detected != len(output):
-                result_details.append(
-                    f"{identifier_string}[WARNING]: PyTorch and nvidia-smi disagree on GPU count! Re-running with all"
-                    " GPUs visible. \n"
-                )
-                result_details.append(f"{identifier_string}[INFO]: This shows that GPU resources were isolated.\n")
-                os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(i) for i in range(len(output))])
-                num_gpus_detected_after_reset = torch.cuda.device_count()
-                result_details.append(
-                    f"{identifier_string}[INFO]: After setting CUDA_VISIBLE_DEVICES, PyTorch detects"
-                    f" {num_gpus_detected_after_reset} GPUs \n"
-                )
+    def stream_reader(stream, identifier_string, result_details, file=sys.stdout, prefix="[INFO] "):
+        for line in iter(stream.readline, ""):
+            result_details.append(f"{identifier_string}: {line}\n")
+            if log_all_output:
+                print(f"{prefix}{identifier_string}: {line}", end="", file=file)
 
-        except subprocess.CalledProcessError as e:
-            print(f"Error calling nvidia-smi: {e.stderr}")
-            result_details.append({"error": "Failed to retrieve GPU information"})
-    else:
-        if persistent_dir:
-            og_dir = os.getcwd()
-            os.chdir(persistent_dir)
-        process = subprocess.Popen(
-            job_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+    if not extract_experiment:
+        # stream stdout and stderr from process
+        stderr_thread = threading.Thread(
+            target=stream_reader,
+            args=(process.stderr, identifier_string, result_details),
+            kwargs={"file": sys.stderr, "prefix": "[ERROR] "},
         )
-        process_file_descriptor = process.stdout.fileno()
+        stderr_thread.daemon = True
+        stderr_thread.start()
 
-        if persistent_dir:
-            os.chdir(og_dir)
+        # Start stdout reader to continue reading to flush buffer
+        stdout_thread = threading.Thread(
+            target=stream_reader,
+            args=(process.stdout, identifier_string, result_details),
+            kwargs={"file": sys.stdout, "prefix": "[INFO] "},
+        )
+        stdout_thread.daemon = True
+        stdout_thread.start()
+
+        process.wait()
+        now = datetime.now().strftime("%H:%M:%S.%f")
+        completion_info = f"\n[INFO] {identifier_string}: Job Started at {start_time}, completed at {now}\n"
+        print(completion_info)
+
+        if process.returncode != 0:
+            raise RuntimeError(f"{identifier_string} exited with non-zero status {process.returncode}.")
+        result_details.append(completion_info)
+        return " ".join(result_details)
+    else:
+        process_file_descriptor = process.stdout.fileno()
         experiment_name = None
         logdir = None
         experiment_info_pattern = re.compile("Exact experiment name requested from command line: (.+)")
         logdir_pattern = re.compile(r"\[INFO\] Logging experiment in directory: (.+)$")
         err_pattern = re.compile("There was an error (.+)$")
 
-        def stream_reader(stream, identifier_string, result_details):
-            for line in iter(stream.readline, ""):
-                line = line.strip()
-                result_details.append(f"{identifier_string}: {line}\n")
-                if log_all_output:
-                    print(f"{identifier_string}: {line}")
-
         # Read stdout until we find exp. info, up to max_lines_to_search_logs lines, max_time_to_search_logs, or EOF.
         # Do some careful handling prevent overflowing the pipe reading buffer with error 141
         lines_read = 0
         search_duration = 0.0
         search_start_time = time()
+
         while True:
             new_line_ready, _, _ = select.select([process_file_descriptor], [], [], 1.0)  # Wait up to 1s for stdout
             if new_line_ready:
@@ -243,73 +279,64 @@ def execute_job(
                     break
 
                 lines_read += 1
-                line = line.strip()
                 result_details.append(f"{identifier_string}: {line} \n")
 
                 if log_all_output:
                     print(f"{identifier_string}: {line}")
 
-                if extract_experiment:
-                    exp_match = experiment_info_pattern.search(line)
-                    log_match = logdir_pattern.search(line)
-                    err_match = err_pattern.search(line)
+                exp_match = experiment_info_pattern.search(line)
+                log_match = logdir_pattern.search(line)
+                err_match = err_pattern.search(line)
 
-                    if err_match:
-                        raise ValueError(f"Encountered an error during trial run. {' '.join(result_details)}")
+                if err_match:
+                    raise ValueError(f"Encountered an error during trial run. {' '.join(result_details)}")
 
-                    if exp_match:
-                        experiment_name = exp_match.group(1)
-                    if log_match:
-                        logdir = log_match.group(1)
+                if exp_match:
+                    experiment_name = exp_match.group(1)
+                if log_match:
+                    logdir = log_match.group(1)
 
-                    if experiment_name and logdir:
-                        # Start stderr reader after finding experiment info
-                        stderr_thread = threading.Thread(
-                            target=stream_reader, args=(process.stderr, identifier_string, result_details)
-                        )
-                        stderr_thread.daemon = True
-                        stderr_thread.start()
+                if experiment_name and logdir:
+                    # Start stderr reader after finding experiment info
+                    stderr_thread = threading.Thread(
+                        target=stream_reader, args=(process.stderr, identifier_string, result_details)
+                    )
+                    stderr_thread.daemon = True
+                    stderr_thread.start()
 
-                        # Start stdout reader to continue reading to flush buffer
-                        stdout_thread = threading.Thread(
-                            target=stream_reader, args=(process.stdout, identifier_string, result_details)
-                        )
-                        stdout_thread.daemon = True
-                        stdout_thread.start()
+                    # Start stdout reader to continue reading to flush buffer
+                    stdout_thread = threading.Thread(
+                        target=stream_reader, args=(process.stdout, identifier_string, result_details)
+                    )
+                    stdout_thread.daemon = True
+                    stdout_thread.start()
 
-                        return {
-                            "experiment_name": experiment_name,
-                            "logdir": logdir,
-                            "proc": process,
-                            "result": " ".join(result_details),
-                        }
+                    return {
+                        "experiment_name": experiment_name,
+                        "logdir": logdir,
+                        "proc": process,
+                        "result": " ".join(result_details),
+                    }
 
-            if extract_experiment:  # if we are looking for experiment info, check for timeouts and line limits
-                search_duration = time() - search_start_time
-                if search_duration > max_time_to_search_logs:
-                    print(f"[ERROR]: Could not find experiment logs within {max_time_to_search_logs} seconds.")
-                    break
-                if lines_read >= max_lines_to_search_logs:
-                    print(f"[ERROR]: Could not find experiment logs within first {max_lines_to_search_logs} lines.")
-                    break
+            # check for timeouts and line limits
+            search_duration = time() - search_start_time
+            if search_duration > max_time_to_search_logs:
+                print(f"[ERROR] Could not find experiment logs within {max_time_to_search_logs} seconds.")
+                break
+            if lines_read >= max_lines_to_search_logs:
+                print(f"[ERROR] Could not find experiment logs within first {max_lines_to_search_logs} lines.")
+                break
 
         # If we reach here, we didn't find experiment info in the output
-        if extract_experiment and not (experiment_name and logdir):
-            error_msg = (
-                "Could not extract experiment_name/logdir from trainer output "
-                f"(experiment_name={experiment_name!r}, logdir={logdir!r}).\n"
-                "\tMake sure your training script prints the following correctly:\n"
-                "\t\tExact experiment name requested from command line: <name>\n"
-                "\t\t[INFO] Logging experiment in directory: <logdir>\n\n"
-            )
-            print(f"[ERROR]: {error_msg}")
-            raise LogExtractionError("Could not extract experiment_name/logdir from training workflow output.")
-        process.wait()
-        now = datetime.now().strftime("%H:%M:%S.%f")
-        completion_info = f"\n[INFO]: {identifier_string}: Job Started at {start_time}, completed at {now}\n"
-        print(completion_info)
-        result_details.append(completion_info)
-        return " ".join(result_details)
+        error_msg = (
+            "Could not extract experiment_name/logdir from trainer output "
+            f"(experiment_name={experiment_name!r}, logdir={logdir!r}).\n"
+            "\tMake sure your training script prints the following correctly:\n"
+            "\t\tExact experiment name requested from command line: <name>\n"
+            "\t\t[INFO] Logging experiment in directory: <logdir>\n\n"
+        )
+        print(f"[ERROR] {error_msg}")
+        raise LogExtractionError("Could not extract experiment_name/logdir from training workflow output.")
 
 
 def ray_init(ray_address: str = "auto", runtime_env: dict[str, Any] | None = None, log_to_driver: bool = False):
@@ -434,7 +461,7 @@ def fill_in_missing_resources(
     args: argparse.Namespace, resources: dict | None = None, cluster_creation_flag: bool = False, policy: callable = max
 ):
     """Normalize the lengths of resource lists based on the longest list provided."""
-    print("[INFO]: Filling in missing command line arguments with best guess...")
+    print("[INFO] Filling in missing command line arguments with best guess...")
     if resources is None:
         resources = {
             "gpu_per_worker": args.gpu_per_worker,
@@ -448,7 +475,7 @@ def fill_in_missing_resources(
 
     # Calculate the maximum length of any list
     max_length = max(len(v) for v in resources.values())
-    print("[INFO]: Resource list lengths:")
+    print("[INFO] Resource list lengths:")
     for key, value in resources.items():
         print(f"[INFO] {key}: {len(value)} values {value}")
 
@@ -461,7 +488,7 @@ def fill_in_missing_resources(
             max_value = policy(value)
         extension_length = max_length - len(value)
         if extension_length > 0:  # Only extend if the current list is shorter than max_length
-            print(f"\n[WARNING]: Resource '{key}' needs extension:")
+            print(f"\n[WARN] Resource '{key}' needs extension:")
             print(f"[INFO] Current length: {len(value)}")
             print(f"[INFO] Target length: {max_length}")
             print(f"[INFO] Filling in {extension_length} missing values with {max_value}")
@@ -470,7 +497,7 @@ def fill_in_missing_resources(
         setattr(args, key, value)
         resources[key] = value
         print(f"[INFO] Final {key} values: {getattr(args, key)}")
-    print("[INFO]: Done filling in command line arguments...\n\n")
+    print("[INFO] Done filling in command line arguments...\n\n")
     return args
 
 
@@ -689,7 +716,7 @@ def submit_wrapped_jobs(
         None
     """
     if jobs is None or len(jobs) == 0:
-        print("[WARNING]: No jobs to submit")
+        print("[WARN] No jobs to submit")
         return
     if not ray.is_initialized():
         raise Exception("Ray is not initialized. Please initialize Ray before submitting jobs.")
@@ -706,15 +733,22 @@ def submit_wrapped_jobs(
             ray.get([actor.ready.remote() for actor in actors])
             print("[INFO] All actors are ready to run.")
         future = [actor.run.remote() for actor in actors]
+        failed = False
         while future:
             ready, not_ready = ray.wait(future, timeout=5)
-            for result in ray.get(ready):
-                pass
-                # print(f"\n{result}\n")
+            for result in ready:
+                try:
+                    ray.get(result)
+                except RuntimeError as e:
+                    print(f"[ERROR] Actor failed: {e.args[0]}")
+                    failed = True
             future = not_ready
-        print("[INFO] all jobs completed.")
+        if failed:
+            print("[ERROR] One or more actors failed. Exiting with non-zero status.")
+            sys.exit(1)
+        print("[INFO] All jobs completed.")
     except KeyboardInterrupt:
-        print("[INFO] KeyboardInterrupt received, cancelling …")
+        print("[INFO] KeyboardInterrupt received, cancelling...")
         for actor in actors:
             ray.cancel(actor, force=True)
         sys.exit(0)
