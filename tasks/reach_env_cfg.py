@@ -137,48 +137,48 @@ class RewardsCfg:
     # task terms
     end_effector_position_tracking = RewTerm(
         func=task_mdp.position_command_error,
-        weight=1.0,
+        weight=2.5,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
             "command_name": "ee_pose",
-            "std": 0.1,
+            "std": 0.12,
         },
     )
     end_effector_position_tracking_fine_grained = RewTerm(
         func=task_mdp.position_command_error,
-        weight=1.0,
+        weight=4.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
             "command_name": "ee_pose",
-            "std": 0.05,
+            "std": 0.06,
         },
     )
     end_effector_orientation_tracking = RewTerm(
         func=task_mdp.orientation_command_error,
-        weight=1.0,
+        weight=3.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
             "command_name": "ee_pose",
-            "std": 1.0,
+            "std": 0.40,
         },
     )
 
     # penalty terms
     action_rate = RewTerm(
         func=task_mdp.action_rate_l2,
-        weight=-1.0
+        weight=-1.5
     )
     joint_vel = RewTerm(
         func=task_mdp.joint_vel_l2,
-        weight=-1.0,
+        weight=-0.5,
     )
     joint_acc = RewTerm(
         func=task_mdp.joint_acc_l2,
-        weight=-0.001,
+        weight=-0.08,
     )
     joint_torque = RewTerm(
         func=task_mdp.joint_torques_l2,
-        weight=-1.0,
+        weight=-0.75,
     )
 
 
